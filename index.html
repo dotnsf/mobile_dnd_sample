@@ -1,0 +1,285 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3c.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta charset="utf8"/>
+<meta http-equiv="pragma" content="no-cache"/>
+<script src="https://code.jquery.com/jquery-2.2.4.min.js"></script>
+<link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet"/>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black"/>
+<meta name="apple-mobile-web-app-title" content="Mobile DnD"/>
+
+<title>Mobile DnD</title>
+<script>
+//. 付箋の背景色パターン
+var colors = [ '#cccccc', '#ffcccc', '#ccffcc', '#ccccff', '#ffffcc', '#ffccff', '#ccffff' ];
+//. 初期状態で用意する付箋
+var items = [
+	{ x: 10, y: 10, w: 100, h: 20, text: 'こんにちは', color: colors[0] },
+	{ x: 10, y: 40, w: 100, h: 20, text: 'ハロー', color: colors[1] },
+	{ x: 30, y: 100, w: 50, h: 20, text: 'abc', color: colors[2] },
+	{ x: 100, y: 100, w: 50, h: 20, text: 'xyz', color: colors[3] },
+	{ x: 20, y: 200, w: 100, h: 20, text: 'さようなら', color: colors[4] }
+];
+
+var idx = -1;  //. 選択した付箋のインデックス
+var hold_wait = 300;  //. この数値（ミリ秒）以内に２度タップしたらダブルタップとみなす
+
+$(function(){
+  var canvas = document.getElementById( 'myCanvas' );
+  if( !canvas || !canvas.getContext ){
+    return false;
+  }
+  var ctx = canvas.getContext( '2d' );
+
+  var mouse = {
+    x: 0,
+    y: 0,
+		innerX: 0,
+		innerY: 0,
+    isMoving: false,
+    lasttouch: 0,
+  };
+  var borderWidth = 1;
+
+	//. タッチが動いた
+  canvas.addEventListener( "touchmove", function( e ){
+    //. タッチが動いたら座標値を取得
+    var t = e.changedTouches[0];
+    var rect = e.target.getBoundingClientRect();
+
+		//. 指の座標
+    mouse.x = ( isAndroid() ? t.pageX : e.pageX ) - rect.left - borderWidth;
+    mouse.y = ( isAndroid() ? t.pageY : e.pageY ) - rect.top - borderWidth;
+
+    //. すでに何かの付箋を選択していたら、その付箋を動かして再描画
+    if( mouse.isMoving && idx > -1 ){
+			items[idx].x = mouse.x - mouse.innerX;
+			items[idx].y = mouse.y - mouse.innerY;
+
+			drawItems();
+    }
+  });
+
+  //. タッチした
+  canvas.addEventListener( "touchstart", function( e ){
+    var t = e.changedTouches[0];
+    var rect = t.target.getBoundingClientRect();
+    mouse.x = t.pageX - rect.left - borderWidth;
+    mouse.y = t.pageY - rect.top - borderWidth;
+
+		idx = selectItem( mouse.x, mouse.y );
+		if( idx > -1 ){
+			mouse.innerX = mouse.x - items[idx].x;
+			mouse.innerY = mouse.y - items[idx].y;
+			mouse.isMoving = true;
+
+			//. ダブルタップの２回目か？
+			var t = ( new Date() ).getTime();
+			if( t - mouse.lasttouch < hold_wait ){
+				//. ダブルタップされた場合は編集ダイアログを表示
+			  mouse.lasttouch = t;
+				mouse.isMoving = false;
+        hold_item( idx );
+			}else{
+			  mouse.lasttouch = t;
+			}
+		}
+  });
+
+  //. タッチが終了した
+  canvas.addEventListener( "touchend", function( e ){
+    mouse.isMoving = false;
+    mouse.isDragging = false;
+		idx = -1;
+  });
+  canvas.addEventListener( "touchcancel", function( e ){
+    mouse.isMoving = false;
+    mouse.isDragging = false;
+		idx = -1;
+  });
+
+  //. リサイズ時に Canvas サイズを変更する
+  $(window).on( 'load resize', function(){
+    resized();
+  });
+
+  //. スクロール禁止
+  var movefun = function( event ){
+    event.preventDefault();
+  }
+  window.addEventListener( 'touchmove', movefun, { passive: false } );
+
+	//. 編集ダイアログが閉じられた時の処理
+  $( '#editModal').on( 'hidden.bs.modal', function(){
+	  var v = $('#isDelete').val();
+		if( v ){
+			//. 削除
+			$('#isDelete').val( '' );
+	    drawItems();
+		}else{
+		  var text = $('#editTitle').val();
+	  	if( text ){
+	  	  var m = parseInt( $('#editIndex').val() );
+	    	if( m > -1 ){
+	    		//. 編集
+	    	  items[m].text = text;
+	    	  drawItems();
+	    	}else{
+	    		//. 追加
+					var n = items.length % colors.length;
+	    		var item = { x: 100, y: 200, w: 100, h: 20, text: text, color: colors[n] };
+	    		items.push( item );
+
+	    	  drawItems();
+	    	}
+		  }
+		}
+
+	});
+
+	//. 編集ダイアログが表示される際の追加処理
+	$('#editModal').on( 'show.bs.modal', function(){
+	});
+});
+
+//. スマホが Android かどうかの判断
+function isAndroid(){
+  return ( navigator.userAgent.indexOf( 'Android' ) > 0 );
+}
+
+//. 画面リサイズ（スマホでは一番最初に１回だけ発生）時の処理
+function resized(){
+  var browserWidth = window.innerWidth;
+  var browserHeight = window.innerHeight;
+  var canvas = document.getElementById( 'myCanvas' );
+  if( canvas && canvas.getContext ){
+		//. キャンバスのサイズを画面サイズの相対値で指定
+    canvas.width = browserWidth * 0.8;
+    canvas.height = browserHeight * 0.6;
+  }
+
+	drawItems();
+}
+
+//. タップした座標に付箋があるか？
+function selectItem( x, y ){
+	var r = -1;
+
+	for( var i = 0; i < items.length && r == -1; i ++ ){
+		var item = items[i];
+		if( item.x <= x && x <= ( item.x + item.w ) && item.y <= y && y <= ( item.y + item.h ) ){
+	    r = i;
+		}
+	}
+
+  return r;
+}
+
+//. 現在の付箋の状態を描画する
+function drawItems(){
+  var canvas = document.getElementById( 'myCanvas' );
+  if( !canvas || !canvas.getContext ){
+    return false;
+  }
+  var ctx = canvas.getContext( '2d' );
+
+	//. キャンバス
+  ctx.beginPath();
+  ctx.fillStyle = "#ffffff";
+	ctx.fillRect( 0, 0, canvas.width, canvas.height );
+  ctx.strokeStyle = "#000000";
+	ctx.strokeRect( 0, 0, canvas.width, canvas.height );
+
+	//. 付箋
+	for( var i = 0; i < items.length; i ++ ){
+		var item = items[i];
+    ctx.beginPath();
+    ctx.fillStyle = item.color;
+		ctx.fillRect( item.x, item.y, item.w, item.h );
+    ctx.fillStyle = 'black';
+		ctx.textAlign = 'center';
+		ctx.fillText( item.text, item.x + item.w / 2, item.y + item.h, item.w );
+    ctx.stroke();
+	}
+}
+
+//. 付箋の編集ダイアログを表示
+function hold_item( idx ){
+	$('#editIndex').val( idx );
+	$('#delete_item_button').css( 'display', 'block' );
+	$('#editTitle').val( items[idx].text );
+	$('#isDelete').val( '' );
+	$('#editModalLabel').html( 'EDIT' );
+	$('#editModal').modal( 'show' );
+}
+
+//. 付箋の新規作成ダイアログを表示
+function new_item(){
+	$('#editIndex').val( '-1' );
+	$('#delete_item_button').css( 'display', 'none' );
+	$('#editTitle').val( '' );
+	$('#isDelete').val( '' );
+	$('#editModalLabel').html( 'ADD' );
+	$('#editModal').modal( 'show' );
+}
+
+//. DELETE ボタンタップ後の処理
+function delete_item(){
+	var idx = $('#editIndex').val();
+	if( confirm( 'このアイテムを削除していいですか？' ) ){
+		items.splice( idx, 1 );
+
+	  $('#editIndex').val( '' );
+	  $('#editTitle').val( '' );
+	  $('#isDelete').val( '1' );
+
+	  $('#editModalLabel').html( '' );
+    $('body').removeClass( 'modal-open' );
+    $('div.modal-backdrop').remove();
+	  $('#editModal').hide();
+
+		drawItems();
+	}
+}
+</script>
+<style>
+</style>
+</head>
+<body>
+
+<div class="container">
+	<h1>Mobile DnD</h1>
+	<canvas id="myCanvas"></canvas>
+	<div>
+		<button class="btn btn-xs btn-success" onClick="new_item();">NEW</button>
+	</div>
+</div>
+
+<div class="modal bd-example-modal-lg fade" id="editModal" tabindex="-1" role="dialog" aria-labbelledby="editModal" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h4 class="modal-title" id="editModalLabel">EDIT</h4>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body justify-content-center" id="editmodal-body">
+				<input type="hidden" id="editIndex" value=""/>
+				<input type="hidden" id="isDelete" value=""/>
+				<input type="text" id="editTitle" class="form-control" value=""/>
+      </div>
+      <div class="modal-footer btn-center">
+        <button type="button" class="btn btn-primary modal_button" data-dismiss="modal">OK</button>
+        <button id="delete_item_button" type="button" class="btn btn-danger modal_button" onClick="delete_item();" data-dismiss="modal">DELETE</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
